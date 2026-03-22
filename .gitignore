@@ -1,0 +1,28 @@
+# Python
+**/__pycache__/
+**/.venv/
+
+# Kestra & Docker
+.env*
+kestra_data/
+kestra_postgres_data/
+kestra_wd/
+pgadmin_data/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform_creds.json
+crash.*.log
+*.tfvars
+*.tfvars.json
+
+# Raw Data
+*.csv
+*.csv.gz
+*.json
+*.parquet
+**/data/
+cache/
