@@ -8,10 +8,11 @@ kestra_data/
 kestra_postgres_data/
 kestra_wd/
 pgadmin_data/
+main_tutorial*
 
 # Terraform
 .terraform/
-.terraform.lock.hcl
+# .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 terraform_creds.json
