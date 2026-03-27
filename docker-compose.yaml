@@ -58,7 +58,9 @@ services:
       - kestra_data:/app/storage
       - /var/run/docker.sock:/var/run/docker.sock
       - kestra_wd:/tmp/kestra-wd
-      - ./flows:/app/flows        # bind mount for flows directory for smoothe running and local development
+      - ./flows:/app/flows        # bind mount for flows directory for smooth running and local development
+      - ./f1_cache:/app/f1_cache        # bind mount for f1_cache dir to store the data from the API calls, avoid hitting the API limits
+      - ./scripts:/app/scripts        # bind mount for scripts directory to store the scripts for the flows
     env_file: 
       - .env_encoded
     environment:

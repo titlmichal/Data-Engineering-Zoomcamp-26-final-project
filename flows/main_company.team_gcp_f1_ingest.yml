@@ -1,0 +1,323 @@
+id: gcp_f1_ingest
+namespace: company.team
+
+inputs:
+  - id: year
+    type: SELECT
+    displayName: Select year
+    values: ["2018", "2019", "2020", "2021", "2022", "2023"]
+    defaults: "2019"
+    allowCustomValue: true # allows for custom values to be entered e.g. for future years
+  
+  - id: is_testing
+    type: BOOLEAN
+    displayName: Testing mode
+    defaults: false
+
+tasks:
+  - id: f1_workdir
+    type: io.kestra.plugin.core.flow.WorkingDirectory
+    outputFiles:
+      - f1_raw_data/**
+
+    tasks:
+      - id: ingest_f1_data
+        type: io.kestra.plugin.scripts.python.Script
+        containerImage: ghcr.io/kestra-io/pydata:latest
+        beforeCommands:
+          - pip install fastf1
+          - pip install pyarrow==22.0.0
+        script: |
+          import os
+          import sys
+
+          import pyarrow # GOING FOR STABLE 22.0.0
+          import pandas as pd
+          import fastf1
+
+          YEAR = int('{{ inputs.year }}')
+          IS_TESTING = '{{ inputs.is_testing }}'.lower() == 'true'
+
+          CACHE_DIR = "f1_cache"
+          OUTPUT_DIR = "f1_raw_data"
+          os.makedirs(CACHE_DIR, exist_ok=True) # Ensure the cache directory exists
+          os.makedirs(OUTPUT_DIR, exist_ok=True)  # Create output directory if it doesn't exist
+          fastf1.Cache.enable_cache(CACHE_DIR)  # Enable caching to speed up data retrieval
+
+          def clean_dtypes(df):
+              """
+              Formats timdelta columns to seconds and datetime columns to ISO string for better compatibility with Parquet format and saving to BQ.
+              """
+              for col in df.columns:
+                  if pd.api.types.is_timedelta64_dtype(df[col]):
+                      df[col] = df[col].dt.total_seconds()
+                  elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                      df[col] = df[col].dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+              return df
+
+          event_schedule = fastf1.get_event_schedule(YEAR)
+          for index, event in event_schedule.iterrows():
+              if event["EventFormat"] == "testing":
+                  continue  # Skip testing events
+
+              # processing log
+              event_id = event["RoundNumber"]
+              event_name = event["EventName"].replace(" ", "_").replace("/", "_")
+              print(f"--> Processing (nr.{event_id}): {event_name} ({YEAR})")
+
+              try:
+                  # getting data
+                  session = fastf1.get_session(YEAR, event_id, "R")
+                  session.load(telemetry=False, weather=False, messages=False)
+
+                  # laps data
+                  laps_df = clean_dtypes(session.laps)
+                  laps_path = os.path.join(OUTPUT_DIR, "laps", f"year={YEAR}", f"event_id={event_id}")
+                  os.makedirs(laps_path, exist_ok=True)
+                  laps_df.to_parquet(os.path.join(laps_path, "laps.parquet"), index=False)
+
+                  # results data
+                  results_df = clean_dtypes(session.results)
+                  results_path = os.path.join(OUTPUT_DIR, "results", f"year={YEAR}", f"event_id={event_id}")
+                  os.makedirs(results_path, exist_ok=True)
+                  results_df.to_parquet(os.path.join(results_path, "results.parquet"), index=False)
+
+                  print(f"--> Successfully processed event {event_name} ({YEAR})")
+
+              except Exception as e:
+                  print(f"### Error processing event {event_name} ({YEAR}): {e}")
+              
+              if IS_TESTING:
+                  print("--> Testing mode enabled, stopping after first event.")
+                  break
+      # files are outputted now from the workdir module
+      # e.g. outputs.f1_workdir["outputFiles"]["f1_raw_data/results/year=2019/event_id=1/results.parquet"]
+
+      - id: inspect_output
+        type: io.kestra.plugin.scripts.shell.Commands
+        taskRunner:
+          type: io.kestra.plugin.core.runner.Process
+        commands:
+          - find f1_raw_data -type f | sort
+
+  - id: upload_to_gcs
+    type: io.kestra.plugin.core.flow.ForEach
+    values: "{{ outputs.f1_workdir.outputFiles | keys }}"
+    tasks:
+      - id: upload_file
+        type: io.kestra.plugin.gcp.gcs.Upload
+        from: "{{ outputs.f1_workdir.outputFiles[taskrun.value] }}" # taskrun.value references the current file in the loop
+        to: "gs://{{ kv('GCP_BUCKET_NAME') }}/{{ taskrun.value }}" # GCS undestands the structure in the path and will create folders accordingly
+
+  # Laps tables creation (target table if not existis, external tables from paruqets, id based merge)
+  # target raw table if not exists:
+  - id: bq_laps_raw_table
+    type: io.kestra.plugin.gcp.bigquery.Query
+    sql: |
+      CREATE TABLE IF NOT EXISTS `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.laps_raw` (
+            lap_id INT64,
+            year INT64,
+            event_id INT64,
+            Time FLOAT64,
+            Driver STRING,
+            DriverNumber STRING,
+            LapTime FLOAT64,
+            LapNumber INT64,
+            Stint INT64,
+            PitOutTime FLOAT64,
+            PitInTime FLOAT64,
+            Sector1Time FLOAT64,
+            Sector2Time FLOAT64,
+            Sector3Time FLOAT64,
+            Sector1SessionTime FLOAT64,
+            Sector2SessionTime FLOAT64,
+            Sector3SessionTime FLOAT64,
+            SpeedI1 FLOAT64,
+            SpeedI2 FLOAT64,
+            SpeedFL FLOAT64,
+            SpeedST FLOAT64,
+            IsPersonalBest BOOL,
+            Compound STRING,
+            TyreLife INT64,
+            FreshTyre BOOL,
+            Team STRING,
+            LapStartTime FLOAT64,
+            LapStartDate TIMESTAMP,
+            TrackStatus STRING,
+            Position INT64,
+            Deleted BOOL,
+            DeletedReason STRING,
+            FastF1Generated BOOL,
+            IsAccurate BOOL,
+            loaded_at TIMESTAMP
+      )
+      PARTITION BY RANGE_BUCKET(year, GENERATE_ARRAY(2018, 2035, 1))
+      CLUSTER BY event_id, Driver;
+    # PARTITION BY RANGE_BUCKET(year, GENERATE_ARRAY(2018, 2035, 1)) recommended by codex --> not sure tbh
+  
+  # external table from parquets:
+  - id: bq_laps_external_table
+    type: io.kestra.plugin.gcp.bigquery.Query
+    sql: |
+      CREATE OR REPLACE EXTERNAL TABLE `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.laps_external`
+      WITH PARTITION COLUMNS
+      OPTIONS (
+          format = 'PARQUET',
+          uris = ['gs://{{ kv('GCP_BUCKET_NAME') }}/f1_raw_data/laps/*'],
+          hive_partition_uri_prefix = 'gs://{{kv('GCP_BUCKET_NAME')}}/f1_raw_data/laps/',
+          require_hive_partition_filter = FALSE
+      );
+    
+  # table merge based on ids:
+  - id: bq_laps_merge_tables
+    type: io.kestra.plugin.gcp.bigquery.Query
+    sql: |
+      MERGE INTO `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.laps_raw` AS target
+      USING (
+      SELECT
+        FARM_FINGERPRINT(
+          CONCAT(
+            CAST(year AS STRING), '|',
+            CAST(event_id AS STRING), '|',
+            COALESCE(Driver, ''), '|',
+            CAST(CAST(LapNumber AS INT64) AS STRING)
+          )
+        ) AS lap_id,
+        CAST(year AS INT64) AS year,
+        CAST(event_id AS INT64) AS event_id,
+        CAST(Time AS FLOAT64) AS Time,
+        Driver,
+        DriverNumber,
+        CAST(LapTime AS FLOAT64) AS LapTime,
+        CAST(LapNumber AS INT64) AS LapNumber,
+        CAST(Stint AS INT64) AS Stint,
+        CAST(PitOutTime AS FLOAT64) AS PitOutTime,
+        CAST(PitInTime AS FLOAT64) AS PitInTime,
+        CAST(Sector1Time AS FLOAT64) AS Sector1Time,
+        CAST(Sector2Time AS FLOAT64) AS Sector2Time,
+        CAST(Sector3Time AS FLOAT64) AS Sector3Time,
+        CAST(Sector1SessionTime AS FLOAT64) AS Sector1SessionTime,
+        CAST(Sector2SessionTime AS FLOAT64) AS Sector2SessionTime,
+        CAST(Sector3SessionTime AS FLOAT64) AS Sector3SessionTime,
+        CAST(SpeedI1 AS FLOAT64) AS SpeedI1,
+        CAST(SpeedI2 AS FLOAT64) AS SpeedI2,
+        CAST(SpeedFL AS FLOAT64) AS SpeedFL,
+        CAST(SpeedST AS FLOAT64) AS SpeedST,
+        CAST(IsPersonalBest AS BOOL) AS IsPersonalBest,
+        Compound,
+        CAST(TyreLife AS INT64) AS TyreLife,
+        CAST(FreshTyre AS BOOL) AS FreshTyre,
+        Team,
+        CAST(LapStartTime AS FLOAT64) AS LapStartTime,
+        TIMESTAMP(LapStartDate) AS LapStartDate,
+        TrackStatus,
+        CAST(Position AS INT64) AS Position,
+        CAST(Deleted AS BOOL) AS Deleted,
+        DeletedReason,
+        CAST(FastF1Generated AS BOOL) AS FastF1Generated,
+        CAST(IsAccurate AS BOOL) AS IsAccurate,
+        CURRENT_TIMESTAMP() AS loaded_at
+      FROM `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.laps_external`
+      WHERE year = CAST('{{ inputs.year }}' AS INT64)
+      ) AS source
+      ON target.lap_id = source.lap_id
+      WHEN NOT MATCHED THEN
+        INSERT ROW
+
+  # same for results table
+  # results tables creation (target table if not existis, external tables from paruqets, id based merge)
+  - id: bq_results_raw_table
+    type: io.kestra.plugin.gcp.bigquery.Query
+    sql: |
+      CREATE TABLE IF NOT EXISTS `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.results_raw` (
+          result_id INT64,
+          year INT64,
+          event_id INT64,
+          DriverNumber STRING,
+          BroadcastName STRING,
+          Abbreviation STRING,
+          DriverId STRING,
+          TeamName STRING,
+          TeamColor STRING,
+          TeamId STRING,
+          FirstName STRING,
+          LastName STRING,
+          FullName STRING,
+          HeadshotUrl STRING,
+          CountryCode STRING,
+          Position INT64,
+          ClassifiedPosition STRING,
+          GridPosition INT64,
+          Q1 FLOAT64,
+          Q2 FLOAT64,
+          Q3 FLOAT64,
+          Time FLOAT64,
+          Status STRING,
+          Points FLOAT64,
+          Laps INT64,
+          loaded_at TIMESTAMP
+      )
+      PARTITION BY RANGE_BUCKET(year, GENERATE_ARRAY(2018, 2035, 1)) 
+      CLUSTER BY event_id;
+    # PARTITION BY RANGE_BUCKET(year, GENERATE_ARRAY(2018, 2035, 1)) recommended by codex --> not sure tbh
+
+  # external table from parquets:
+  - id: bq_results_external_table
+    type: io.kestra.plugin.gcp.bigquery.Query
+    sql: |
+      CREATE OR REPLACE EXTERNAL TABLE `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.results_external`
+      WITH PARTITION COLUMNS
+      OPTIONS (
+          format = 'PARQUET',
+          uris = ['gs://{{ kv('GCP_BUCKET_NAME') }}/f1_raw_data/results/*'],
+          hive_partition_uri_prefix = 'gs://{{kv('GCP_BUCKET_NAME')}}/f1_raw_data/results/',
+          require_hive_partition_filter = FALSE
+      );
+  
+  # table merge based on ids:
+  - id: bq_results_merge_tables
+    type: io.kestra.plugin.gcp.bigquery.Query
+    sql: |
+      MERGE INTO `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.results_raw` AS target
+      USING (
+        SELECT
+          FARM_FINGERPRINT(CONCAT(CAST(year AS STRING), '|', CAST(event_id AS STRING), '|', DriverNumber)) AS result_id,
+          CAST(year AS INT64) AS year,
+          CAST(event_id AS INT64) AS event_id,
+          DriverNumber,
+          BroadcastName,
+          Abbreviation,
+          DriverId,
+          TeamName,
+          TeamColor,
+          TeamId,
+          FirstName,
+          LastName,
+          FullName,
+          HeadshotUrl,
+          CountryCode,
+          CAST(Position AS INT64) AS Position,
+          ClassifiedPosition,
+          CAST(GridPosition AS INT64) AS GridPosition,
+          CAST(Q1 AS FLOAT64) AS Q1,
+          CAST(Q2 AS FLOAT64) AS Q2,
+          CAST(Q3 AS FLOAT64) AS Q3,
+          CAST(Time AS FLOAT64) AS Time,
+          Status,
+          CAST(Points AS FLOAT64) AS Points,
+          CAST(Laps AS INT64) AS Laps,
+          CURRENT_TIMESTAMP() AS loaded_at
+        FROM `{{kv('GCP_PROJECT_ID')}}.{{kv('GCP_DATASET')}}.results_external`
+        WHERE year = CAST('{{ inputs.year }}' AS INT64)
+      ) AS source
+      ON target.result_id = source.result_id
+      WHEN NOT MATCHED THEN
+        INSERT ROW
+        
+pluginDefaults:
+  - type: io.kestra.plugin.gcp
+    values:
+      serviceAccount: "{{kv('GCP_CREDS')}}"
+      projectId: "{{kv('GCP_PROJECT_ID')}}"
+      location: "{{kv('GCP_LOCATION')}}"
+      bucket: "{{kv('GCP_BUCKET_NAME')}}"

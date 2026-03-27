@@ -1,6 +1,7 @@
 # Python
 **/__pycache__/
 **/.venv/
+f1_test.ipynb
 
 # Kestra & Docker
 .env*
@@ -27,3 +28,6 @@ crash.*.log
 *.parquet
 **/data/
 cache/
+f1_cache/
+f1_raw_data/
+.bruin.yml
