@@ -12,7 +12,8 @@ tasks:
     type: io.kestra.plugin.core.kv.Set
     key: GCP_LOCATION
     kvType: STRING
-    value: europe-central2
+    value: EU
+    # dataset is multilocation/regional
 
   - id: gcp_bucket_name
     type: io.kestra.plugin.core.kv.Set

@@ -53,5 +53,5 @@ docker-compose up -d
 2) docker
 - see above
 
-3) kesta
+3) kestra
 - ...

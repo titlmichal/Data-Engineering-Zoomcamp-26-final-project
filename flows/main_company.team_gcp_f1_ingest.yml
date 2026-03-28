@@ -19,6 +19,8 @@ tasks:
     type: io.kestra.plugin.core.flow.WorkingDirectory
     outputFiles:
       - f1_raw_data/**
+    
+    ########################################## DATA INGESTION FROM FASTF AND FILES CREATON ##########################################
 
     tasks:
       - id: ingest_f1_data
@@ -38,6 +40,8 @@ tasks:
           YEAR = int('{{ inputs.year }}')
           IS_TESTING = '{{ inputs.is_testing }}'.lower() == 'true'
 
+          # currently the local cache dir is mounted to /app/f1_chache ...
+          # ... and the workdir task uses extra runner container above the main kestra one --> cant see the mount
           CACHE_DIR = "f1_cache"
           OUTPUT_DIR = "f1_raw_data"
           os.makedirs(CACHE_DIR, exist_ok=True) # Ensure the cache directory exists
@@ -108,6 +112,8 @@ tasks:
         type: io.kestra.plugin.gcp.gcs.Upload
         from: "{{ outputs.f1_workdir.outputFiles[taskrun.value] }}" # taskrun.value references the current file in the loop
         to: "gs://{{ kv('GCP_BUCKET_NAME') }}/{{ taskrun.value }}" # GCS undestands the structure in the path and will create folders accordingly
+  
+  ################################################# LAPS BIGQUERY #################################################
 
   # Laps tables creation (target table if not existis, external tables from paruqets, id based merge)
   # target raw table if not exists:
@@ -142,7 +148,6 @@ tasks:
             FreshTyre BOOL,
             Team STRING,
             LapStartTime FLOAT64,
-            LapStartDate TIMESTAMP,
             TrackStatus STRING,
             Position INT64,
             Deleted BOOL,
@@ -152,8 +157,9 @@ tasks:
             loaded_at TIMESTAMP
       )
       PARTITION BY RANGE_BUCKET(year, GENERATE_ARRAY(2018, 2035, 1))
-      CLUSTER BY event_id, Driver;
+      CLUSTER BY event_id, DriverNumber;
     # PARTITION BY RANGE_BUCKET(year, GENERATE_ARRAY(2018, 2035, 1)) recommended by codex --> not sure tbh
+    # removing LapStartDate bcs of low importance (LapStartTime has the needed info already) and issues with handling the column
   
   # external table from parquets:
   - id: bq_laps_external_table
@@ -179,7 +185,7 @@ tasks:
           CONCAT(
             CAST(year AS STRING), '|',
             CAST(event_id AS STRING), '|',
-            COALESCE(Driver, ''), '|',
+            COALESCE(DriverNumber, ''), '|',
             CAST(CAST(LapNumber AS INT64) AS STRING)
           )
         ) AS lap_id,
@@ -209,7 +215,6 @@ tasks:
         CAST(FreshTyre AS BOOL) AS FreshTyre,
         Team,
         CAST(LapStartTime AS FLOAT64) AS LapStartTime,
-        TIMESTAMP(LapStartDate) AS LapStartDate,
         TrackStatus,
         CAST(Position AS INT64) AS Position,
         CAST(Deleted AS BOOL) AS Deleted,
@@ -222,7 +227,27 @@ tasks:
       ) AS source
       ON target.lap_id = source.lap_id
       WHEN NOT MATCHED THEN
-        INSERT ROW
+        INSERT (
+          lap_id, year, event_id, Time, Driver, DriverNumber, LapTime, LapNumber, Stint,
+          PitOutTime, PitInTime, Sector1Time, Sector2Time, Sector3Time,
+          Sector1SessionTime, Sector2SessionTime, Sector3SessionTime,
+          SpeedI1, SpeedI2, SpeedFL, SpeedST, IsPersonalBest, Compound, TyreLife,
+          FreshTyre, Team, LapStartTime, TrackStatus, Position,
+          Deleted, DeletedReason, FastF1Generated, IsAccurate, loaded_at
+        )
+        VALUES (
+          source.lap_id, source.year, source.event_id, source.Time, source.Driver, source.DriverNumber,
+          source.LapTime, source.LapNumber, source.Stint, source.PitOutTime, source.PitInTime,
+          source.Sector1Time, source.Sector2Time, source.Sector3Time,
+          source.Sector1SessionTime, source.Sector2SessionTime, source.Sector3SessionTime,
+          source.SpeedI1, source.SpeedI2, source.SpeedFL, source.SpeedST, source.IsPersonalBest,
+          source.Compound, source.TyreLife, source.FreshTyre, source.Team, source.LapStartTime,
+          source.TrackStatus, source.Position, source.Deleted,
+          source.DeletedReason, source.FastF1Generated, source.IsAccurate, source.loaded_at
+        );
+    # previously used INSERT ROW but thats not that robust for e.g. slowing changing schema --> going for explicit call
+  
+  ##################################################### RESULTS TABLE BIQUERY #####################################################
 
   # same for results table
   # results tables creation (target table if not existis, external tables from paruqets, id based merge)
@@ -312,7 +337,21 @@ tasks:
       ) AS source
       ON target.result_id = source.result_id
       WHEN NOT MATCHED THEN
-        INSERT ROW
+        INSERT (
+          result_id, year, event_id, DriverNumber, BroadcastName, Abbreviation, DriverId,
+          TeamName, TeamColor, TeamId, FirstName, LastName, FullName, HeadshotUrl,
+          CountryCode, Position, ClassifiedPosition, GridPosition, Q1, Q2, Q3, Time,
+          Status, Points, Laps, loaded_at
+        )
+        VALUES (
+          source.result_id, source.year, source.event_id, source.DriverNumber, source.BroadcastName,
+          source.Abbreviation, source.DriverId, source.TeamName, source.TeamColor, source.TeamId,
+          source.FirstName, source.LastName, source.FullName, source.HeadshotUrl,
+          source.CountryCode, source.Position, source.ClassifiedPosition, source.GridPosition,
+          source.Q1, source.Q2, source.Q3, source.Time, source.Status, source.Points,
+          source.Laps, source.loaded_at
+        );
+  # previously used INSERT ROW but thats not that robust for e.g. slowing changing schema --> going for explicit call
         
 pluginDefaults:
   - type: io.kestra.plugin.gcp
