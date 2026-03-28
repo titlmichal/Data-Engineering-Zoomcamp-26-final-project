@@ -1,0 +1,21 @@
+
+version: 2
+
+models:
+  - name: stg_laps
+    description: "Staging model for laps data"
+    columns:
+      - name: lap_id
+        description: "The primary key for this table"
+        data_tests:
+          - unique
+          - not_null
+
+  - name: stg_results
+    description: "Staging model for results data"
+    columns:
+      - name: result_id
+        description: "The primary key for this table"
+        data_tests:
+          - unique
+          - not_null

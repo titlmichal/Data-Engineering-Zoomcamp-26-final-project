@@ -1,0 +1,10 @@
+sources:
+  - name: raw_data
+    description: "Raw data for F1 analytics"
+    database: "{{ var('gcp_project_id') }}"
+    schema: "{{ var('bq_dataset') }}"
+    tables:
+      - name: laps_raw
+        description: "Raw laps data"
+      - name: results_raw
+        description: "Raw results data"

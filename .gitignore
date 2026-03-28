@@ -3,6 +3,11 @@
 **/.venv/
 f1_test.ipynb
 
+# dbt
+profiles.yml
+logs/
+.user.yml
+
 # Kestra & Docker
 .env*
 kestra_data/

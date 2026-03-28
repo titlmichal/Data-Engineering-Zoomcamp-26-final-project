@@ -106,6 +106,7 @@ tasks:
 
   - id: upload_to_gcs
     type: io.kestra.plugin.core.flow.ForEach
+    description: Loops over files from previous module, uploads to GCS and process into raw table via external in BQ
     values: "{{ outputs.f1_workdir.outputFiles | keys }}"
     tasks:
       - id: upload_file
