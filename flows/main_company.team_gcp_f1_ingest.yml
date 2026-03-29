@@ -82,6 +82,7 @@ tasks:
 
                   # results data
                   results_df = clean_dtypes(session.results)
+                  results_df["event_name"] = event_name
                   results_path = os.path.join(OUTPUT_DIR, "results", f"year={YEAR}", f"event_id={event_id}")
                   os.makedirs(results_path, exist_ok=True)
                   results_df.to_parquet(os.path.join(results_path, "results.parquet"), index=False)
@@ -259,6 +260,7 @@ tasks:
           result_id INT64,
           year INT64,
           event_id INT64,
+          event_name STRING,
           DriverNumber STRING,
           BroadcastName STRING,
           Abbreviation STRING,
@@ -310,6 +312,7 @@ tasks:
           FARM_FINGERPRINT(CONCAT(CAST(year AS STRING), '|', CAST(event_id AS STRING), '|', DriverNumber)) AS result_id,
           CAST(year AS INT64) AS year,
           CAST(event_id AS INT64) AS event_id,
+          event_name,
           DriverNumber,
           BroadcastName,
           Abbreviation,
@@ -339,13 +342,13 @@ tasks:
       ON target.result_id = source.result_id
       WHEN NOT MATCHED THEN
         INSERT (
-          result_id, year, event_id, DriverNumber, BroadcastName, Abbreviation, DriverId,
+          result_id, year, event_id, event_name, DriverNumber, BroadcastName, Abbreviation, DriverId,
           TeamName, TeamColor, TeamId, FirstName, LastName, FullName, HeadshotUrl,
           CountryCode, Position, ClassifiedPosition, GridPosition, Q1, Q2, Q3, Time,
           Status, Points, Laps, loaded_at
         )
         VALUES (
-          source.result_id, source.year, source.event_id, source.DriverNumber, source.BroadcastName,
+          source.result_id, source.year, source.event_id, source.event_name, source.DriverNumber, source.BroadcastName,
           source.Abbreviation, source.DriverId, source.TeamName, source.TeamColor, source.TeamId,
           source.FirstName, source.LastName, source.FullName, source.HeadshotUrl,
           source.CountryCode, source.Position, source.ClassifiedPosition, source.GridPosition,

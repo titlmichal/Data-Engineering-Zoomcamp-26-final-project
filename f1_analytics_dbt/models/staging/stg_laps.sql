@@ -43,7 +43,7 @@ select
     cast(IsPersonalBest as bool) as is_personal_best,             -- counted only for valid laps
     cast(Compound as string) as compound,                         -- SOFT, MEDIUM, HARD, INTERMEDIATE, WET, TEST_UNKNOWN, UNKNOWN.
     cast(TyreLife as int64) as tyre_life_in_laps,                 -- incl. laps on other sessions if driven
-    cast(FreshTyre as bool) as is_fresh_tyre,
+    cast(FreshTyre as bool) as is_fresh_tyre,                     -- = tire was new put on this lap
     cast(TrackStatus as string) as track_status_concat,           -- lenght of up to 5 chars in data --> should create bool cols (e.g. is_SC)
     /*
       ‘1’: Track clear (beginning of session or to indicate the end

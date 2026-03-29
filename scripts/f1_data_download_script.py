@@ -55,6 +55,7 @@ for index, event in event_schedule.iterrows():
 
         # results data
         results_df = clean_dtypes(session.results)
+        results_df["event_name"] = event_name
         results_path = os.path.join(OUTPUT_DIR, "results", f"year={YEAR}", f"event_id={event_id}")
         os.makedirs(results_path, exist_ok=True)
         results_df.to_parquet(os.path.join(results_path, "results.parquet"), index=False)
