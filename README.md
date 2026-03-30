@@ -146,3 +146,17 @@ uv run dbt debug --project-dir f1_analytics_dbt --profiles-dir .
 ```bash
 uv run dbt build --project-dir f1_analytics_dbt --profiles-dir .
 ```
+
+## Dashboard sheets/question answered
+
+### Tyre degradation
+
+![alt text](image.png)
+
+### Pit efficiency
+
+![alt text](image-1.png)
+
+### Race recult X pace
+
+![alt text](image-2.png)
