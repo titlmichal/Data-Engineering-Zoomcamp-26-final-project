@@ -1,0 +1,37 @@
+id: gcp_f1_dbt_build
+namespace: company.team
+
+tasks:
+  - id: git_and_dbt
+    type: io.kestra.plugin.core.flow.WorkingDirectory
+    tasks:
+      - id: clone_repository
+        type: io.kestra.plugin.git.Clone
+        url: https://github.com/titlmichal/Data-Engineering-Zoomcamp-26-final-project
+        branch: main
+
+      - id: dbt_build
+        type: io.kestra.plugin.dbt.cli.DbtCLI
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+        containerImage: ghcr.io/kestra-io/dbt-bigquery:latest
+        inputFiles:
+          sa.json: "{{ secret('GCP_SERVICE_ACCOUNT') }}"
+        projectDir: f1_analytics_dbt
+        commands:
+          - dbt build --project-dir f1_analytics_dbt
+        profiles: |
+          f1_analytics_dbt:
+            outputs:
+              dev:
+                type: bigquery
+                dataset: "{{ kv('GCP_DATASET') }}"
+                project: "{{ kv('GCP_PROJECT_ID') }}"
+                keyfile: sa.json
+                location: "{{ kv('GCP_LOCATION') }}"
+                method: service-account
+                priority: interactive
+                threads: 4
+                timeout_seconds: 300
+                fixed_retries: 1
+            target: dev

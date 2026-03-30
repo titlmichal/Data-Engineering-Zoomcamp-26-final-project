@@ -14,6 +14,7 @@ models:
         data_tests:
           - not_null
           - relationships:
+            arguments:
               to: ref('dim_season_drivers_teams')
               field: season_driver_team_key
 
@@ -27,6 +28,7 @@ models:
         data_tests:
           - not_null
           - relationships:
+            arguments:
               to: ref('dim_season_drivers_teams')
               field: season_driver_team_key
 
@@ -40,5 +42,6 @@ models:
         data_tests:
           - not_null
           - relationships:
+            arguments:
               to: ref('dim_season_drivers_teams')
               field: season_driver_team_key
