@@ -1,107 +1,148 @@
 # F1 Analytics: Data-Engineering-Zoomcamp-26-final-project
 
-## Brief description
+## Brief description/problem statement
 
-N/A
+Goal: process and analyse F1 data, especially tyre and pit stop information in relation to race results
+FastF1 is used as datasource due to its pre-processing and availability.
+3 questions are to be answered:
 
-## Prerequisities to run
+    1) How drivers slow down due to tire age (incl. distinction by compound)?
+    2) Which teams and drivers spend most time in pit?
+    3) How are these information related to race results?
 
-1) GCP account
-- with enabled project
-- service account for terraform (Storage and BigQuery admin)
-- service account key for this account
-    - will likely encounter issue "Service account key creation is disabled"
-    - open ```GCP console/terminal``` --> ```gcloud resource-manager org-policies disable-enforce iam.disableServiceAccountKeyCreation --project=PROJECT_NAME``` --> wait 10-15 minutes --> will be enabled --> save as e.g. ```service_account.json```
+Dashboard link: https://lookerstudio.google.com/reporting/95c7a1f8-8a68-4a7e-8425-57ae1774b60a
 
-1a) google cloud SDK
-- ...
+## Notes/limitations
 
-2) terraform installed
-- run to init terraform:
-```bash
-terraform init
+- FastF1 can be unstable due to upstream APIs
+- ```results.Time``` is winner time/gap to winner
+- pit stop efficiency is heuristics from lap-level data (excl. red flag laps and such)
+- ```track_status``` is simplified for analytics, with a focus on clean laps (```is_only_clear_track```) for tyre degradation analysis
+
+## Possible improvements / future work
+
+- replace the inline ingestion Python script in Kestra with a repository-cloned script approach, similar to the dbt flow
+- add richer race dimension metadata such as circuit, country, and event date
+- improve pit stop modeling using more explicit event-level or telemetry/race-control sources
+- extend data quality testing in dbt beyond key and relationship checks
+- add a more polished dashboard layer and richer visual explanations
+
+## Architecture
+
+Raw data are stored in GCS as parquet files with hive-style partitions and then merged into native BigQuery tables before dbt transformations
+- flow:
 ```
-- run to see what the terraform is about to create:
-```bash
-terraform plan
-```
-- run to let terraform actually create it:
-```bash
-terraform apply
-```
-- possibly can run into something like this: ```Error: googleapi: Error 403: The billing account for the owning project is disabled in state absent, accountDisabled```
-    - if you followed zoomcamp in each module and create project for each topic/homework, free account has limited number of assignments per billing account --> remove or temporarly disable billing from one of existing projects
-- run to remove everything and avoid potential billing of your account in the future:
-```bash
-terraform destroy
+FastF1 API 
+    --> Kestra ingest (Docker, Python) 
+        --> GCS parquets w/ hive-style partitions 
+            --> BQ external tables 
+                --> BQ raw tables 
+                    --> dbt models (staging, intermediate, mart, reporting) 
+                        --> Looker
 ```
 
-3) docker/docker compose installed
-- create ```.env_encoded``` file
+### Tech stack
+
+- Kestra
+- FastF1
+- GCS/BQ
+- dbt Core
+- Terraform
+- Docker Compose
+- uv
+
+### Data model
+
+- raw
+    1) laps_raw
+    2) results_raw
+- staging
+    1) stg_laps
+    2) stg_results
+- intermediate
+    1) int_track_status
+- marts
+    1) dim_season_drivers_teams     (driver x season x team grain)
+    2) fct_laps                     (lap grain)
+    3) fct_results                  (results grain)
+- reporting
+    1) rpt_pit_efficiency           (lap/pit x driver grain)
+    2) rpt_tyre_degradation         (lap x driver grain)
+    3) rpt_race_result_vs_pace      (results grain)
+
+## Reproducibility
+
+### Prerequisites
+
+1) GCP account (enabled billing, service account for GCS and BQ admin; use ```gcloud resource-manager org-policies disable-enforce iam.disableServiceAccountKeyCreation --project=PROJECT_NAME``` in console if needed)
+2) google cloud SDK
+3) terraform
+4) docker
+5) uv
+
+### How to reproduce
+
+1) Dependencies
+```bash
+uv sync
+```
+
+2) Create GCP project with service account and export json with credentials
+
+- for smooth reproduction use ```service_account.json``` name in the ```root``` repo
+
+3) Terraform
+- choose project, bucket, dataset, location, service account via ```variables.tf```
+- run resources creation
+```bash
+terraform plan      # see what will be created
+terraform apply     # actually create resources
+```
+- after running ```apply``` check/align values in ```main_company.team_gcp_kv_v2.yml``` (see below)
+
+```bash
+terraform destroy   # clear your GCP after all desired checks (e.g. to avoid extra billing later!)
+```
+
+4) Environment variable for GCP credentials
+- create file ```.env_encoded``` in ```root``` repo
+- contents have to be:
 ```
 SECRET_GCP_SERVICE_ACCOUNT=GCP_SERVICE_ACCOUNT_JSON_ENCODED_IN_BASE64_UTF-8-CRLF
 ```
-- replace ```GCP_SERVICE_ACCOUNT_JSON_ENCODED_IN_BASE64_UTF-8-CRLF``` with contents of ```service_account.json``` file encoded in base64, using UTF-8 encoding nad CRLF newline separator (e.g. base64encode.org/)
+- replace ```GCP_SERVICE_ACCOUNT_JSON_ENCODED_IN_BASE64_UTF-8-CRLF``` with contents of ```service_account.json``` file encoded in base64, using UTF-8 encoding and CRLF newline separator (e.g. base64encode.org/)
 
-4) kestra kv setup
-- spin up docker containers using:
+5) Kestra/GCP connection
+- open ```main_company.team_gcp_kv_v2.yml``` in ```flows``` directory
+- update the values to match your created GCP resources (also used e.g. in ```variables.tf```)
+- this flow will run in the master flow so it does not require its own run
+
+6) Docker compose
+- run:
 ```bash
 docker-compose up -d
 ```
-- visit ```localhost:8080/``` to access Kestra UI
-- find and run flow ```gcp_kv_v2```
 
-5) dbt core
-- will add both dbt core and dbt bigquery connector
-```bash
-uv add dbt-bigquery
+7) Kestra
+- visit ```localhost:8080/``` to access Kestra UI
+- use credentials from ```docker-compose.yaml```
+```yml
+username: "admin@kestra.io"
+password: Admin1234
 ```
-- now you will need ```profiles.yaml``` file, ideally in the project directory
-- you can use and adjust existing ones if you used dbt with GCP before or create new one, either way, see below the content
-```yaml
-...
-f1_analytics_dbt:
-  outputs:
-    dev:
-      dataset: [GCP_DATASET_NAME]
-      job_execution_timeout_seconds: 300
-      job_retries: 1
-      keyfile: [GCP_SERVICE_ACCOUNT_JSON_FILE_PATH]
-      location: [GCP_PROJECT_LOCATION]
-      method: service-account
-      priority: interactive
-      project: [GCP_PROJECT_ID]
-      threads: 1
-      type: bigquery
-  target: dev
-...
-```
-- to check the connection if it works
+- find flow ```gcp_f1_master``` and run it
+- dbt subflow clones the project from the public GitHub repository to run the models
+- if running from a fork or modified copy, update the repository URL in ```main_company.team_gcp_f1_dbt_build.yml```
+
+*) Optional: dbt profiles for local development
+- ```profiles.yml``` is optional because Kestra dbt execution does not use it, this ```only``` for local development
+- if you want to try dbt models locally (no via Kestra runner), you will need your own local ```profiles.yml``` file in the ```root``` repo
+- see ```profiles.yml.example``` as reference and use the same values used for terraform or kestra kv setup
+- run to check connections etc.
 ```bash
 uv run dbt debug --project-dir f1_analytics_dbt --profiles-dir .
 ```
-- you will also need to adjust the ```dbt_project.yml``` --> ```vars``` section according to your resources set up build by terraform
-- --> that will be used in ```_sources.yaml``` in ```f1_analytics\models\stagging``` to be referenced in model building
-```yaml
-vars:
-  gcp_project_id: [GCP_PROJECT_ID]
-  bq_dataset: [GCP_DATASET_NAME]
-```
-- (local testing only; otherwise this step is done by Kestra) to build the models
+- run for build from local CLI
 ```bash
 uv run dbt build --project-dir f1_analytics_dbt --profiles-dir .
 ```
-
-6) uv?
-- ...
-
-## How to run
-
-1) terraform
-- see above
-
-2) docker
-- see above
-
-3) kestra
-- ...

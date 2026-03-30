@@ -1,0 +1,43 @@
+id: gcp_f1_master
+namespace: company.team
+
+concurrency:
+  limit: 1
+
+inputs:
+  - id: year
+    type: SELECT
+    displayName: Select year
+    values: ["2018", "2019", "2020", "2021", "2022", "2023"]
+    defaults: "2019"
+    allowCustomValue: true # allows for custom values to be entered e.g. for future years
+  
+  - id: is_testing
+    type: BOOLEAN
+    displayName: Testing mode
+    defaults: false
+
+tasks:
+  - id: kv_setup
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: company.team
+    flowId: gcp_kv_v2
+    wait: true
+    transmitFailed: true
+
+  - id: ingest
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: company.team
+    flowId: gcp_f1_ingest
+    wait: true
+    transmitFailed: true
+    inputs:
+      year: "{{ inputs.year }}"
+      is_testing: "{{ inputs.is_testing }}"
+
+  - id: dbt_build
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: company.team
+    flowId: gcp_f1_dbt_build
+    wait: true
+    transmitFailed: true

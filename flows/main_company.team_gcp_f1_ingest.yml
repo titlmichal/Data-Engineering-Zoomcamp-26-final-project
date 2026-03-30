@@ -1,6 +1,9 @@
 id: gcp_f1_ingest
 namespace: company.team
 
+concurrency:
+  limit: 1
+
 inputs:
   - id: year
     type: SELECT
