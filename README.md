@@ -16,7 +16,7 @@ Dashboard link: https://lookerstudio.google.com/reporting/95c7a1f8-8a68-4a7e-842
 
 - FastF1 can be unstable due to upstream APIs
 - ```results.Time``` is winner time/gap to winner
-- pit stop efficiency is heuristics from lap-level data (excl. red flag laps and such)
+- pit stop efficiency is a heuristic from lap-level data (excl. red flag laps and such)
 - ```track_status``` is simplified for analytics, with a focus on clean laps (```is_only_clear_track```) for tyre degradation analysis
 
 ## Possible improvements / future work
@@ -135,7 +135,7 @@ password: Admin1234
 - if running from a fork or modified copy, update the repository URL in ```main_company.team_gcp_f1_dbt_build.yml```
 
 *) Optional: dbt profiles for local development
-- ```profiles.yml``` is optional because Kestra dbt execution does not use it, this ```only``` for local development
+- ```profiles.yml``` is optional because Kestra dbt execution does not use it, this is ```only``` for local development
 - if you want to try dbt models locally (no via Kestra runner), you will need your own local ```profiles.yml``` file in the ```root``` repo
 - see ```profiles.yml.example``` as reference and use the same values used for terraform or kestra kv setup
 - run to check connections etc.
@@ -157,6 +157,6 @@ uv run dbt build --project-dir f1_analytics_dbt --profiles-dir .
 
 ![alt text](image-1.png)
 
-### Race recult X pace
+### Race result X pace
 
 ![alt text](image-2.png)
