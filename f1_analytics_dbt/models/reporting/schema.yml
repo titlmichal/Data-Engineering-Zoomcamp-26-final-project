@@ -14,9 +14,9 @@ models:
         data_tests:
           - not_null
           - relationships:
-            arguments:
-              to: ref('dim_season_drivers_teams')
-              field: season_driver_team_key
+              arguments:
+                to: ref('dim_season_drivers_teams')
+                field: season_driver_team_key
 
   - name: rpt_pit_efficiency
     columns:
@@ -28,9 +28,9 @@ models:
         data_tests:
           - not_null
           - relationships:
-            arguments:
-              to: ref('dim_season_drivers_teams')
-              field: season_driver_team_key
+              arguments:
+                to: ref('dim_season_drivers_teams')
+                field: season_driver_team_key
 
   # due to break down of metrics by compound, the result_id is no more unique
   - name: rpt_race_result_vs_pace
@@ -42,6 +42,6 @@ models:
         data_tests:
           - not_null
           - relationships:
-            arguments:
-              to: ref('dim_season_drivers_teams')
-              field: season_driver_team_key
+              arguments:
+                to: ref('dim_season_drivers_teams')
+                field: season_driver_team_key
